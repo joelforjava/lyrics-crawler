@@ -1,4 +1,4 @@
-import sys, dbus, requests
+import sys, requests, subprocess
 from bs4 import BeautifulSoup
 from constants import (
     TOKEN
@@ -13,20 +13,44 @@ defaults = {
         'search_fail': 'The lyrics for this song were not found!',
         'wrong_input': 'Wrong number of arguments.\n' \
                        'Use two parameters to perform a custom search ' \
-                       'or none to get the song currently playing on Spotify.'
+                       'or none to get the song currently playing on Spotify, iTunes, or Sonos.',
+        'connection_issue': 'There was a problem connecting to the Sonos service'
+    },
+    'response': {
+        'artist': '', 
+        'title': ''
     }
 }
 
-def get_current_song_info():
-    # kudos to jooon at stackoverflow http://stackoverflow.com/a/33923095
-    session_bus = dbus.SessionBus()
-    spotify_bus = session_bus.get_object('org.mpris.MediaPlayer2.spotify',
-                                         '/org/mpris/MediaPlayer2')
-    spotify_properties = dbus.Interface(spotify_bus,
-                                        'org.freedesktop.DBus.Properties')
-    metadata = spotify_properties.Get('org.mpris.MediaPlayer2.Player', 'Metadata')
 
-    return {'artist': metadata['xesam:artist'][0], 'title': metadata['xesam:title']}
+def get_current_song_info():
+    song = get_current_sonos_song_info()
+
+    if not song:
+        song = get_current_itunes_song_info()
+
+    return song
+
+def get_current_sonos_song_info():
+    # This is a URL to a running instance of https://github.com/jishi/node-sonos-http-api
+    node_sonos_url = 'http://localhost:5005/state'
+    # At some point, need to add a check for playbackState!
+    try:
+        metadata = requests.get(node_sonos_url)
+        current_track = metadata.json()['currentTrack']
+    except:
+        print(defaults['message']['connection_issue'])
+        return
+
+    return {'artist': current_track['artist'], 'title': current_track['title']}
+
+def get_current_itunes_song_info():
+    # Note that this will only work on macOS/OSX!
+    current_track = subprocess.check_output(['osascript', 'current_itunes_song.applescript'])
+    split = current_track.decode().split(" || ")
+    song_artist = split[0]
+    song_name = split[1]
+    return {'artist': song_artist.rstrip(), 'title': song_name.rstrip()}
 
 def request_song_info(song_title, artist_name):
     base_url = defaults['request']['base_url']
